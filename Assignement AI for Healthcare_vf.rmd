@@ -1,0 +1,1048 @@
+---
+title: "Assignement AI for healthcare"
+author: "Valentin Uzan & Mioraniaina Rakotondrazafy"
+date: "2024-12-07"
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+```{r}
+
+
+library(tableone)
+library(ggplot2)
+library(survey)
+library(boot) 
+library(MatchIt)
+library(miceadds)
+library(lmtest)
+library(sandwich)
+library(survey)
+
+```
+
+# **Practical 1**
+
+1.  Interpretation of ATE and ATT Average Treatment Effect (ATE): The ATE measures the average effect of CPAP adherence on reducing daytime sleepiness across the entire population, including both those who adhered to CPAP and those who did not. Interpretation: It answers the question: "What would be the average reduction in the odds of daytime sleepiness if everyone in the population adhered to CPAP treatment?"
+
+Average Treatment Effect on the Treated (ATT): The ATT measures the average effect of CPAP adherence on reducing daytime sleepiness specifically for those who adhered to CPAP.
+
+2.  The ATE and ATT will differ when there is treatment effect heterogeneity, meaning the effect of CPAP adherence varies between those who adhered to treatment and those who did not. This can happen when:
+
+The characteristics of patients who adhere to CPAP differ significantly from those who do not.
+There are confounding factors that influence both the likelihood of adhering to CPAP and the outcome of daytime sleepiness.
+There is selection bias in treatment assignment (e.g., only patients with severe symptoms are more likely to adhere to CPAP).
+
+3.  The ATT (Average Treatment Effect on the Treated) is likely the most relevant quantitie because:
+
+We are primarily interested in understanding the effectiveness of CPAP for patients who actually adhered to the treatment.
+In clinical practice, adherence to CPAP is challenging, and knowing the benefit for those who adhere helps inform treatment decisions.
+The goal is to determine whether encouraging adherence to CPAP reduces daytime sleepiness, which is directly relevant for patients currently using or considering CPAP.
+The ATE could also be useful if we were evaluating a policy to promote CPAP adherence for all patients, but the ATT is more actionable for understanding the real-world impact among those who comply.
+
+4.  Exploring data
+
+```{r}
+OSA <- readRDS("OSA.rds")
+
+# Exposure
+prop.table(table(OSA$CPAP_adherence))
+# Outcome
+prop.table(table(OSA$Daytime_sleepiness))
+
+```
+
+This indicates that 53.5% of patients adhere to CPAP treatment (using it for more than 4 hours per night), while 46.5% do not.
+This indicates that 46.95% of patients report experiencing daytime sleepiness, while 53.05% do not.
+
+This initial tabulation helps us understand the distribution of our exposure (CPAP adherence) and outcome (daytime sleepiness).
+
+```{r}
+prop.table(table(OSA$Daytime_sleepiness, OSA$CPAP_adherence), 2)
+m <- glm(formula = Daytime_sleepiness ~ CPAP_adherence, family = "binomial", data = OSA)
+summary(m)
+
+crude_OR <- exp(cbind(coef(m), confint(m)))
+crude_OR
+```
+
+**OR = 0.1212** (less than 1):\
+This indicates that **CPAP adherence is associated with significantly lower odds of experiencing daytime sleepiness**.
+Specifically, patients who adhere to CPAP have about **88% lower odds** of daytime sleepiness compared to those who do not adhere.
+
+-   **Confidence Interval (0.0990, 0.1479)**:\
+    The confidence interval does not include 1, indicating that this result is **statistically significant**.
+
+### Conclusion
+
+CPAP adherence appears to significantly reduce the odds of daytime sleepiness.
+The crude odds ratio suggests a strong protective effect of CPAP use.
+
+6.  . Summarize or tabulate some variables (e.g. age , sex, BMI, snoring, smoking, OSA severity) by CPAP adherence group. Are these characteristics similar across the treatment (CPAP adherence) groups? (You may want to estimate the standardised mean differences).
+
+```{r}
+column_of_interest <- c(
+"Sex",
+"Age",
+"BMI",
+"Snoring",
+"Daytime_sleepiness",
+"Smoking",
+"OSA_severity"
+)
+Table1 <- CreateCatTable(
+vars = column_of_interest,
+strata = "CPAP_adherence",
+data = OSA, smd = TRUE
+)
+print(Table1, smd = TRUE)
+```
+
+-   **Differences Between Groups:**\
+    There are substantial differences in **age, snoring, daytime sleepiness, smoking, and OSA severity** between CPAP adherence groups.
+    These variables are potential **confounders**.
+
+-   **Need for Adjustment:**\
+    To estimate the causal effect of CPAP adherence on reducing daytime sleepiness, it is necessary to adjust for these confounders.
+    This can be achieved using methods such as:
+
+    -   **Propensity Score Matching**
+
+    -   **Inverse Probability of Treatment Weighting (IPTW)**
+
+    -   **Logistic Regression with Adjustment**
+
+-   **Implications for Analysis:**
+
+    -   Without adjusting for these differences, any observed association between CPAP adherence and daytime sleepiness may be **biased**.
+
+    -   Proper adjustment ensures a more accurate estimate of the **true causal effect** of CPAP adherence.
+
+7.  What is the conditional odds ratio (and its 95% confidence interval) for daytime sleepiness, after adjustment for the variables presented in Table 1? Why is it different from the crude odds ratio?
+
+```{r}
+m_mult <- glm(formula = Daytime_sleepiness ~ CPAP_adherence + Sex +
+Age +
+BMI +
+Snoring +
+Smoking +
+OSA_severity,
+family = "binomial", data = OSA)
+summary(m_mult)
+conditional_OR <- exp(cbind(coef(m_mult), confint(m_mult)))
+exp(cbind(coef(m_mult), confint(m_mult)))
+```
+
+### **Interpretation**
+
+-   **OR = 0.1125** (less than 1):\
+    After adjusting for confounding variables, **patients who adhere to CPAP have significantly lower odds of experiencing daytime sleepiness**.
+    Specifically, they have about **88.75% lower odds** compared to non-adherent patients.
+
+-   **95% Confidence Interval (0.0862, 0.1456):**\
+    The interval does not include 1, indicating that this result is **statistically significant**.
+
+### **Why is This Different from the Crude Odds Ratio?**
+
+1.  **Crude Odds Ratio**:\
+    The crude (unadjusted) OR was **0.1212**, calculated without considering other confounding variables.
+
+2.  **Adjusted Odds Ratio**:\
+    The adjusted OR is **0.1125**.
+    This difference arises because the model now accounts for potential confounders like:
+
+    -   **Sex**
+
+    -   **Age**
+
+    -   **BMI**
+
+    -   **Snoring**
+
+    -   **Smoking**
+
+    -   **OSA Severity**
+
+These variables influence both **CPAP adherence** and **daytime sleepiness**, and failing to adjust for them can bias the estimated relationship between adherence and sleepiness.
+
+-   The **conditional (adjusted) OR** reflects a more accurate estimate of the association between CPAP adherence and daytime sleepiness by controlling for confounding factors.
+
+-   The adjusted OR is slightly smaller than the crude OR, indicating that the confounders likely **diminished the effect** of CPAP adherence when not accounted for.
+
+8.  Fit a propensity score model, a logistic regression model with CPAP adherence as the outcome, and the confounders listed in the table above included as categorical variables. Look at the estimated regression coefficients. Which variables are associated with CPAP adherence?
+
+```{r}
+m2 <- glm(formula = CPAP_adherence ~ Sex +
+Age +
+BMI +
+Snoring +
+Smoking +
+OSA_severity,
+family = "binomial", data = OSA)
+summary(m2)
+
+```
+
+### **Key Findings: Variables Associated with CPAP Adherence**
+
+1.  **Age**:
+
+    -   **Age 40-60**: OR = e−1.1846≈0.31e\^{-1.1846} \approx 0.31e−1.1846≈0.31
+
+    -   **Age 61-70**: OR = e−2.0028≈0.14e\^{-2.0028} \approx 0.14e−2.0028≈0.14
+
+    -   **Age \> 70**: OR = e−2.7474≈0.06e\^{-2.7474} \approx 0.06e−2.7474≈0.06\
+        **Interpretation**:\
+        Older patients are **significantly less likely** to adhere to CPAP compared to younger patients.
+        The likelihood decreases notably with age.
+
+2.  **BMI**:
+
+    -   **Obese Severe (BMI 36-40)**: OR = e0.4746≈1.61e\^{0.4746} \approx 1.61e0.4746≈1.61
+
+    -   **Obese Very Severe (BMI \> 40)**: OR = e0.5102≈1.67e\^{0.5102} \approx 1.67e0.5102≈1.67
+
+        **Interpretation**:\
+        Patients with severe and very severe obesity are **more likely** to adhere to CPAP.
+
+3.  **Snoring**:
+
+    -   **Estimate = 1.8059**: OR = e1.8059≈6.09e\^{1.8059} \approx 6.09e1.8059≈6.09
+
+        **Interpretation**:\
+        Patients who snore are **significantly more likely** to adhere to CPAP treatment.
+
+4.  **Smoking**:
+
+    -   **Estimate = -0.7621**: OR = e−0.7621≈0.47e\^{-0.7621} \approx 0.47e−0.7621≈0.47
+
+        **Interpretation**:\
+        Smokers are **less likely** to adhere to CPAP treatment.
+
+5.  **OSA Severity**:
+
+    -   **OSA Severity 2 (Moderate)**: OR = e0.5692≈1.77e\^{0.5692} \approx 1.77e0.5692≈1.77
+
+    -   **OSA Severity 3 (Severe)**: OR = e0.9809≈2.67e\^{0.9809} \approx 2.67e0.9809≈2.67
+
+        **Interpretation**:\
+        Patients with moderate and severe OSA are **more likely** to adhere to CPAP.
+
+<!-- -->
+
+1.  **Less Likely to Adhere**:
+
+    -   **Older Age (40-60, 61-70, \>70)**
+
+    -   **Smokers**
+
+2.  **More Likely to Adhere**:
+
+    -   **Snorers**
+
+    -   **Patients with Severe Obesity (BMI 36-40, \>40)**
+
+    -   **Patients with Moderate or Severe OSA**
+
+These factors should be carefully considered when adjusting for confounding in causal analyses of CPAP adherence and daytime sleepiness.
+
+9.  Predict the propensity score for each individual (for example, using this command:)
+10. Graph the propensity score by exposure group (histograms or density plots). What do you notice?
+
+```{r}
+OSA$PS <- m2$fitted.values
+ggplot(OSA, aes(x = PS, fill = CPAP_adherence, color = CPAP_adherence)) +
+geom_histogram(alpha = 0.2, binwidth = 0.05, boundary = 0, position="identity") +
+xlab(" Estimated propensity score ") +
+ylab(" Count ")
+
+```
+
+The histogram of estimated propensity scores for the two CPAP adherence groups reveals notable patterns.
+Patients who did not adhere to CPAP (represented in red) tend to have lower propensity scores, primarily concentrated between 0.00 and 0.50.
+
+In contrast, patients who adhered to CPAP (represented in blue) tend to have higher propensity scores, clustering around 0.50 to 0.85.
+There is substantial overlap between the two groups in the range of 0.25 to 0.75, indicating that both groups share similar probabilities of adherence in this range, which is important for ensuring valid causal inference through propensity score matching or weighting.
+
+However, there are regions at the extreme ends (below 0.10 and above 0.85) where overlap is limited.
+This lack of overlap suggests that some patients have very different probabilities of adherence, which may pose challenges for analysis and could require trimming or excluding extreme cases to improve the validity of the comparisons.
+
+11. Save this plot somewhere to refer to later. In order to save plot you can use code below
+
+```{r}
+ggplot(OSA, aes(x = PS, fill = CPAP_adherence, color = CPAP_adherence)) +
+geom_histogram(alpha = 0.2, binwidth = 0.05, boundary = 0, position="identity") +
+xlab(" Estimated propensity score ") +
+ylab(" Count ")
+ggsave("Hist_PS.jpeg")
+ggplot(OSA, aes(x = PS, fill = CPAP_adherence, color = CPAP_adherence)) +
+geom_density(alpha = 0.5) +
+xlab(" Estimated propensity score ") +
+ylab(" Count ")
+ggsave("density_PS.jpeg")
+```
+
+12. Assess whether there are non-overlapping scores in the two exposure groups (Hint: check the extrema of the estimated PS in each exposure group).
+    Does this pose a problem for the analysis?
+    If so, what steps might we take to resolve this issue?
+    Is there any reason to believe there is deterministic non-positivity?
+
+    ```{r}
+    min(OSA$PS[OSA$CPAP_adherence ==0])
+    min(OSA$PS[OSA$CPAP_adherence ==1])
+    max(OSA$PS[OSA$CPAP_adherence ==0])
+    max(OSA$PS[OSA$CPAP_adherence ==1])
+    OSA$overlap <- ifelse (OSA$PS >=
+    min(OSA$PS[OSA$CPAP_adherence ==1]) & OSA$PS <= max(OSA$PS[OSA$CPAP_adherence ==0]) ,1,0 )
+    table ( OSA$overlap,OSA$CPAP_adherence )
+    OSA[OSA$PS > quantile(OSA$PS[OSA$CPAP_adherence ==1],0.99) ,]
+
+    ```
+
+    ### Assessing Non-Overlapping Propensity Scores in the Two Exposure Groups
+
+    Based on the provided extrema of the estimated propensity scores for the two CPAP adherence groups:
+
+    1.  Non-Adherent Group (CPAP_adherence = 0):
+
+        -   Minimum Propensity Score: 0.0166
+
+        -   Maximum Propensity Score: 0.9304
+
+    2.  Adherent Group (CPAP_adherence = 1):
+
+        -   Minimum Propensity Score: 0.0521
+
+        -   Maximum Propensity Score: 0.9406
+
+    ### Observations:
+
+    1.  **Overlap Analysis:**
+
+        -   There is a considerable overlap between the two groups in the range of **0.052 to 0.930**.
+
+        -   However, there are small regions at the lower end (**0.0166 to 0.052**) and potentially at the upper end (**0.9304 to 0.9406**) where scores are **non-overlapping**.
+
+    2.  **Non-Overlapping Scores:**
+
+        -   **16 non-adherent patients** have propensity scores below the minimum score for the adherent group.
+
+        -   **9 adherent patients** have propensity scores above the maximum score for the non-adherent group.
+
+        -   These non-overlapping scores suggest that there are patients who are very unlikely to be in the opposite group based on their characteristics.
+
+    ### Implications for Analysis:
+
+    -   **Potential Problem:**\
+        Non-overlapping propensity scores can pose a problem for causal inference because it indicates a lack of comparable individuals between the two groups.
+        This can lead to **poor matches** or **unstable weight estimates** when using propensity score matching or weighting.
+
+    -   **Deterministic Non-Positivity:**\
+        Deterministic non-positivity occurs when certain combinations of covariates make adherence or non-adherence impossible (e.g., patients with specific characteristics are almost guaranteed to adhere or not adhere).
+        The presence of extreme propensity scores suggests this might be the case for some individuals.
+
+    ### Steps to Resolve the Issue:
+
+    1.  **Trimming Extreme Scores:**\
+        Exclude individuals with propensity scores outside the overlapping range (e.g., below 0.052 or above 0.930).
+        This ensures that comparisons are made only within regions where both groups have comparable individuals.
+
+    2.  **Caliper Matching:**\
+        When performing propensity score matching, use a **caliper** (a fixed width) to restrict matches to patients whose propensity scores are within a close range (e.g., 0.05).
+        This reduces the risk of poor matches.
+
+    3.  **Sensitivity Analysis:**\
+        Perform a sensitivity analysis to check how trimming or excluding extreme scores affects the results.
+        This helps ensure that the conclusions are robust.
+
+    4.  **Stratification by Propensity Score:**\
+        Divide the sample into strata (e.g., quintiles) based on propensity scores and compare outcomes within each stratum.
+
+13\.
+Does the assumption of no interference appear reasonable here?
+
+-   **Assumption of No Interference:** This assumption implies that the treatment received by one patient (CPAP adherence) does not influence the outcome (daytime sleepiness) of other patients.
+
+-   **Reasonableness in This Context:**\
+    In the context of CPAP adherence for obstructive sleep apnea (OSA), this assumption appears reasonable.
+    Each patient's use of CPAP is an individual decision and does not directly impact whether another patient adheres to CPAP or experiences daytime sleepiness.
+    There is no clear mechanism for one patient's adherence behavior or treatment outcome to affect another patient's outcome.
+
+**Conclusion:** The assumption of no interference seems valid here.
+
+14. Do the two aspects of the consistency assumption seem plausible?
+    First, that there are no multiple versions of treatment.
+    Second, that intervening (e.g. making CPAP adherence compulsory) versus observing (watching what the patients do in practice) would lead to the same outcomes.
+
+15. **No Multiple Versions of Treatment:**
+
+    -   The consistency assumption requires that the treatment (CPAP adherence) is well-defined and does not have multiple versions that might affect the outcome differently.
+
+    -   **Plausibility:** In this study, CPAP adherence is defined as using the device for at least 4 hours per night.
+        This definition is clear and standardized, making the assumption of no multiple versions of treatment plausible.
+
+16. **Intervening vs. Observing:**
+
+    -   This aspect of consistency assumes that if we intervene to make CPAP adherence compulsory, the outcome (daytime sleepiness) would be the same as if we observe patients who voluntarily adhere to CPAP.
+
+    -   **Plausibility:** This assumption may be **slightly less plausible** because patients who voluntarily adhere to CPAP may be more motivated or have different characteristics (e.g., better health management skills) compared to those who are forced to adhere.
+        These differences could influence outcomes, creating a **potential bias** if adherence is not entirely voluntary.
+
+**Conclusion:**
+
+-   The first aspect (no multiple versions of treatment) appears plausible.
+
+-   The second aspect (intervening vs. observing) may have some limitations due to differences in patient motivation or compliance behavior.
+
+    15. Finally, can you think of any likely factors leading to unmeasured confounding ?
+
+Unmeasured confounding occurs when there are factors influencing both CPAP adherence and daytime sleepiness that have not been accounted for in the analysis.
+Potential sources of unmeasured confounding in this study could include:
+
+1.  **Mental Health Status:**
+
+    -   Conditions like depression or anxiety may influence both adherence to CPAP and the likelihood of experiencing daytime sleepiness.
+
+2.  **Socioeconomic Status (SES):**
+
+    -   Patients with higher SES might have better access to healthcare, education, and support, leading to higher adherence and better outcomes.
+
+3.  **Patient Motivation and Health Literacy:**
+
+    -   The level of understanding and commitment to health practices can affect adherence and the effectiveness of CPAP treatment.
+
+4.  **Sleep Environment:**
+
+    -   Factors like noise, bed quality, or living conditions can influence the effectiveness of CPAP and the occurrence of daytime sleepiness.
+
+5.  **Comorbid Conditions:**
+
+    -   Other health issues (e.g., cardiovascular disease, diabetes) might impact both adherence and sleepiness but may not be fully captured in the dataset.
+
+6.  **Support Systems:**
+
+    -   Family support or participation in sleep therapy groups could influence adherence rates and health outcomes.
+
+**Conclusion:**\
+Addressing these potential confounders would improve the robustness of causal inference.
+Methods like **sensitivity analysis** or collecting additional data on these factors could help mitigate the impact of unmeasured confounding
+
+16. Fit a logistic regression model for daytime sleepiness with the treatment (CPAP adherence) and the propensity score as explanatory variables to estimate the conditional OR (conditional on the PS).
+
+```{r}
+m3 <- glm(Daytime_sleepiness ~ CPAP_adherence + PS,data = OSA ,family = "binomial")
+exp( cbind ( coef (m3), confint (m3))) # 2.8 [2.3;3.6]
+```
+
+-   **CPAP Adherence (OR = 0.1826)**:
+
+    -   The odds of daytime sleepiness for patients who adhere to CPAP are about **82% lower** compared to those who do not adhere, after adjusting for the propensity score.
+
+    -   The **95% confidence interval (0.1473, 0.2258)** does not include 1, indicating that this result is **statistically significant**.
+
+-   **Propensity Score (OR = 1.0575)**:
+
+    -   The propensity score is positively associated with the odds of daytime sleepiness.
+
+    -   For each unit increase in the propensity score, the odds of daytime sleepiness increase by approximately **5.75%**.
+        This indicates that higher propensity scores (reflecting a higher likelihood of adherence) are associated with a higher risk of daytime sleepiness, suggesting residual confounding.
+
+-   **Intercept**:
+
+    -   The intercept represents the baseline odds of daytime sleepiness when both CPAP adherence and the propensity score are held constant
+
+Conclusion
+
+-   Adjusting for the propensity score helps account for confounding and provides a **conditional estimate** of the treatment effect.
+
+-   The **conditional OR** for CPAP adherence (0.1826) shows a significant reduction in daytime sleepiness among those who adhere to CPAP.
+
+-   This conditional effect can later be **standardized** to estimate the **marginal causal effect** on the entire population.
+
+17. Estimate the ATE by averaging the treatment effect in the whole sample.
+    (Hint: predict the outcome for everyone in the sample from the previous model, first considering everyone is treated, then considering everyone is not treated)
+
+    ```{r}
+    # To predict Y(1):
+    OSA1 <- OSA
+    OSA1$CPAP_adherence <- factor(1)
+    OSA$predY1 <- predict(m3, type = "response", newdata = OSA1)
+    Y1 <- mean(OSA$predY1)
+    ```
+
+18. Estimate the ATT instead by averaging only over the CPAP adherent patients.
+    For example, to estimate Y (1), you could use
+
+    ```{r}
+    Y1_1 <- mean(OSA$predY1[OSA$Daytime_sleepiness == 1])
+    OSA0 <- OSA
+    OSA0$CPAP_adherence <- factor(0)
+    OSA$predY0 <- predict(m3, type = "response", newdata = OSA0)
+    Y0 <- mean(OSA$predY0)
+    Y0_1 <- mean(OSA$predY0[OSA$Daytime_sleepiness == 1])
+    ATE_PSadj <- (Y1 / (1 - Y1)) / (Y0 / (1 - Y0))
+    ATT_PSadj <- (Y1_1 / (1 - Y1_1)) / (Y0_1 / (1 - Y0_1))
+    ATE_PSadj
+    ATT_PSadj
+
+    ```
+
+    Make a note of the odds ratios and confidence intervals.
+    we need to use non-parametric bootstrap to obtain the 95%CI, as below:
+
+    ```{r}
+    ATE_ATT_boot <- function ( data, indices ) {
+    d <- data [ indices, ] # allows boot to select sample
+    m1 <- glm(formula = CPAP_adherence ~ Sex + Age +
+    BMI +
+    Snoring +
+    Smoking +
+    OSA_severity,
+    family = "binomial", data = d)
+    d$PS <- fitted.values(m1)
+    m3 <- glm(Daytime_sleepiness ~ CPAP_adherence + PS,data = d ,family = "binomial")
+    d1 <- d
+    d1$CPAP_adherence <- factor(1)
+    d$predY1 <- predict(m3, type = "response", newdata = d1)
+    Y1 <- mean(d$predY1)
+    Y1_1 <- mean(d$predY1[d$Daytime_sleepiness == 1])
+    d0 <- OSA
+    d0$CPAP_adherence <- factor(0)
+    d$predY0 <- predict(m3, type = "response", newdata = d0)
+    Y0 <- mean(d$predY0)
+    Y0_1 <- mean(d$predY0[d$Daytime_sleepiness == 1])
+    ATE_PSadj <- (Y1 / (1 - Y1)) / (Y0 / (1 - Y0))
+    ATT_PSadj <- (Y1_1 / (1 - Y1_1)) / (Y0_1 / (1 - Y0_1))
+    return (c( ATE_PSadj,ATT_PSadj ))
+    }
+
+    set.seed (123)
+    results <- boot( data = OSA, statistic = ATE_ATT_boot,R =1000)
+    res_ATE <-c( ATE_PSadj[1],
+    boot.ci( results,type ="norm" ,index =1)$norm[-1] )
+    res_ATE
+    res_ATT <-c( ATT_PSadj[1],
+    boot.ci( results,type ="norm" ,index =2)$norm[-1] )
+    res_ATT
+    ```
+
+19. The model relies on two additional assumptions: no interaction between the propensity score and the treatment, and a linear relationship between the propensity score and the treatment.
+    Do these assumptions appear reasonable here?
+
+    ```{r}
+    OSA$pred <- m3$fitted.values
+    ggplot( OSA,aes(x = PS,y =pred)) +
+    geom_point(aes()) +
+    geom_smooth(method = "loess")
+    ```
+
+```{r}
+m4 <- glm(Daytime_sleepiness ~ CPAP_adherence + PS + I(PS**2) ,data = OSA ,family = "binomial")
+OSA1 <- OSA
+OSA1$CPAP_adherence <- factor(1)
+OSA$predY1 <- predict(m4, type = "response", newdata = OSA1)
+Y1 <- mean(OSA$predY1)
+Y1_1 <- mean(OSA$predY1[OSA$Daytime_sleepiness == 1])
+OSA0 <- OSA
+OSA0$CPAP_adherence <- factor(0)
+OSA$predY0 <- predict(m4, type = "response", newdata = OSA0)
+Y0 <- mean(OSA$predY0)
+Y0_1 <- mean(OSA$predY0[OSA$Daytime_sleepiness == 1])
+ATE_PSadj <- (Y1 / (1 - Y1)) / (Y0 / (1 - Y0))
+ATT_PSadj <- (Y1_1 / (1 - Y1_1)) / (Y0_1 / (1 - Y0_1))
+ATE_PSadj
+```
+
+```{r}
+# Afficher le nombre de niveaux pour chaque variable catégorielle
+sapply(OSA, function(x) if (is.factor(x)) nlevels(x))
+
+```
+
+```{ATT_PSadj}
+```
+
+Comparison between methods 20.
+Complete the table below and compare all your estimates from the different methods.
+Do you notice any patterns?
+
+# **Practical 2**
+
+```{r}
+OSA$w <- ifelse ( OSA$CPAP_adherence==1 ,1/ OSA$PS , 1/(1 - OSA$PS))
+```
+
+OSA\$w \<- ifelse ( OSA\$CPAP_adherence==1 ,1/ OSA\$PS , 1/(1 - OSA\$PS))
+
+1.  After reestimating the propensity score as in practical 1, create a variable containing the ATE weights for each patient
+
+```{r}
+OSA$w <- ifelse (OSA$CPAP_adherence==1 ,1/ OSA$PS , 1/(1 - OSA$PS))
+```
+
+2.  Do any patients receive particularly large weights?
+
+```{r}
+# Weights among CPAP adherent user
+quantile ( OSA$w[OSA$CPAP_adherence==1] ,c (0 ,0.01 ,0.05 ,0.95 ,0.99 ,1))
+# Weights among CPAP non-adherent user
+quantile ( OSA$w[OSA$CPAP_adherence==0] ,c (0 ,0.01 ,0.05 ,0.95 ,0.99 ,1))
+
+```
+
+Some patients in the dataset receive **particularly large weights**, indicating very low propensity scores.
+This can affect the stability of the causal estimates, and trimming or stabilizing weights can help address this issue.
+
+3.  Look at the characteristics of CPAP adherent patients with the largest weights (e.g.\>4). What do you notice?
+
+```{r}
+large_treat_w <- OSA[OSA$w > 4 & OSA$CPAP_adherence==1,]
+summary(large_treat_w)
+# Display the first few rows
+head(large_treat_w)
+
+# Look at the distribution of relevant variables
+table(large_treat_w$Sex)
+table(large_treat_w$Age)
+table(large_treat_w$BMI)
+table(large_treat_w$Snoring)
+table(large_treat_w$Smoking)
+table(large_treat_w$OSA_severity)
+
+```
+
+The CPAP adherent patients with the largest weights (greater than 4) exhibit distinct characteristics that contribute to their low propensity scores.
+This group primarily consists of **older individuals**, particularly those aged **61 to over 70 years**.
+There is a higher proportion of **female patients** and a notable presence of individuals who are **overweight or moderately obese**.
+Additionally, a significant number of these patients are **smokers** and have **moderate to severe OSA**.
+Despite these characteristics suggesting a lower likelihood of adhering to CPAP treatment, these patients did adhere, leading to their large weights due to the inverse probability weighting method.
+
+The large weights indicate that these patients had a **low predicted probability of adherence** (propensity scores between 0.05 and 0.24), yet they adhered to CPAP.
+This discrepancy means these individuals contribute disproportionately to the analysis, potentially affecting the stability of the causal estimates.
+To address this, **trimming or stabilizing the weights** and conducting **sensitivity analyses** are recommended to ensure the robustness and reliability of the results.
+
+4.  Now, look at the characteristics of non-adherent patients with the largest weights (e.g.\>4). What do you notice?
+
+```{r}
+large_not_treat_w <- OSA[OSA$w > 4 & OSA$CPAP_adherence==0,]
+summary(large_not_treat_w)
+```
+
+The non-adherent patients with the largest weights (greater than 4) display distinct characteristics that explain their high inverse probability weights.
+This group consists of a relatively balanced mix of **females (24) and males (30)**, but notably, **all patients report snoring**.
+Most patients fall within the **40-60 age group**, with **no patients over 70** and very few under 40.
+In terms of body mass index (BMI), there is a higher prevalence of **obesity**, particularly in the **severe and very severe categories**.
+Interestingly, the majority of these patients are **non-smokers (48 out of 54)**, and they predominantly have **moderate to severe OSA**.
+
+These patients have **high propensity scores (ranging from 0.75 to 0.93)**, indicating that, based on their characteristics, they were highly predicted to adhere to CPAP.
+However, they did not adhere, which leads to large weights when calculating 11−PS\frac{1}{1 - \text{PS}}1−PS1​.
+This discrepancy suggests these patients are **atypical non-adherents**, contributing disproportionately to the analysis.
+
+The presence of large weights implies that these individuals, who were expected to adhere but did not, significantly influence the causal estimates.
+This can affect the stability and validity of the analysis.
+To address this, **trimming or stabilizing the weights** and conducting **sensitivity analyses** is advisable to mitigate the impact of these extreme cases and ensure the robustness of the conclusions.
+
+5.  Describe the patients' characteristics by treatment group after weighting. You may use the function svyCreateCatTable (after installing the tableone and survey packages) as follows:
+
+```{r}
+svy <- svydesign (ids = ~ 1, weights = ~ w, data = OSA )
+Table1_w <- svyCreateCatTable(
+vars = column_of_interest,
+strata = "CPAP_adherence",
+data = svy,
+smd = TRUE
+)
+print(Table1_w,smd = TRUE)
+```
+
+After weighting, the characteristics of CPAP adherent and non-adherent patients are well-balanced across most variables, such as **sex, age, BMI, snoring, smoking, and OSA severity**, as indicated by the low standardized mean differences (SMDs).
+This suggests that the weighting process successfully adjusted for confounding factors, making the two groups comparable.
+However, a notable difference remains in **daytime sleepiness**, where **66.2% of non-adherent patients** reported experiencing daytime sleepiness compared to only **28.9% of adherent patients**.
+The high SMD (0.806) for this outcome highlights the effectiveness of CPAP treatment in reducing daytime sleepiness.
+Overall, the balance achieved through weighting ensures that any observed differences in outcomes are more likely attributable to CPAP adherence rather than pre-existing differences between the groups.
+
+Are CPAP adherent users and non-adherent users comparable after weighting?
+
+**CPAP adherent** and **non-adherent** users are **comparable** across most baseline characteristics.
+The standardized mean differences (**SMDs**) for variables such as **sex, age, BMI, snoring, smoking, and OSA severity** are all very low (close to 0), indicating successful balance between the two groups.
+This suggests that the weighting process effectively adjusted for potential confounding factors, making the two groups similar in terms of these characteristics.
+
+However, a notable exception is **daytime sleepiness**, where a large difference remains.
+Specifically, **66.2% of non-adherent users** report daytime sleepiness compared to only **28.9% of adherent users**, with an SMD of **0.806**.
+This reflects the likely **effectiveness of CPAP treatment** in reducing daytime sleepiness rather than a failure of the weighting process.
+Therefore, while the two groups are comparable in terms of baseline characteristics, this remaining difference in daytime sleepiness highlights the impact of CPAP adherence on health outcomes.
+
+6.  Now, create a variable containing the weights for each patient, for the estimation of the ATT:
+
+```{r}
+OSA$w_ATT <- ifelse ( OSA$CPAP_adherence==1 ,1, 1/(1 - OSA$PS))
+```
+
+7.  Do any patients receive particularly large weights, using these new weights? Was it expected?
+
+```{r}
+quantile ( OSA$w_ATT[OSA$CPAP_adherence==0] ,c (0 ,0.01 ,0.05 ,0.95 ,0.99 ,1))
+```
+
+Some non-adherent patients receive particularly large weights using the new weights (`w_ATT`), with the 95th percentile at **4.21**, the 99th percentile at **7.36**, and a maximum weight of **14.36**.
+These large weights indicate that certain patients had a very high predicted probability of adhering to CPAP, yet they did not, making them atypical cases.
+This outcome was expected due to the nature of **Inverse Probability of Treatment Weighting (IPTW)**, where weights become large when the propensity score is close to **1** for non-adherent patients.
+However, these large weights can lead to **instability** and **increased variance** in the causal estimates because these patients disproportionately influence the analysis.
+To address this, techniques such as **trimming extreme weights** or using **stabilized weights** are recommended to ensure more reliable and robust causal inference.
+
+8.  Describe the patients' characteristics by treatment group after weighting using this new sets of weights. Compare the standardized mean differences to those obtained in question 6. What do you notice?
+
+```{r}
+svy_ATT <- svydesign (ids = ~ 1, weights = ~ w_ATT, data = OSA )
+Table1_wATT <- svyCreateCatTable ( vars = column_of_interest,
+strata ="CPAP_adherence" ,data = svy,smd =TRUE)
+print ( Table1_wATT, smd=TRUE)
+```
+
+After applying the new set of weights (`w_ATT`), the characteristics of CPAP adherent and non-adherent patients are well-balanced across most variables.
+The standardized mean differences (SMDs) for **sex, age, BMI, snoring, smoking, and OSA severity** remain low, all well below the threshold of 0.1.
+This indicates that the weighting process effectively adjusted for potential confounding factors, making the two groups comparable.
+Specifically, variables like **sex (SMD = 0.003), age (SMD = 0.029), and BMI (SMD = 0.031)** show minimal differences between the groups.
+However, **daytime sleepiness** remains a notable exception, with **66.2% of non-adherent patients** reporting daytime sleepiness compared to only **28.9% of adherent patients**, resulting in a high SMD of **0.806**.
+This large difference suggests that CPAP adherence has a significant impact on reducing daytime sleepiness.
+Overall, the new weights achieve good balance for baseline characteristics, but the persistent difference in daytime sleepiness highlights the likely effectiveness of CPAP treatment.
+
+9.  Estimate the ATE using IPTW. One option is to fit a weighted logistic regression model for the outcome on treatment only, using the first set of weights as probability weights:
+
+```{r}
+m_PSw <- svyglm( Daytime_sleepiness ~ CPAP_adherence, design =svy ,
+data = OSA , family ="quasibinomial",
+rescale=TRUE)
+exp(c( coef ( m_PSw )[2] , confint ( m_PSw )[2 ,]))
+```
+
+The estimated odds ratio of **0.2073** indicates that, on average, CPAP-adherent patients have **79.3% lower odds** of experiencing daytime sleepiness compared to non-adherent patients.
+The confidence interval (**0.1633 to 0.2632**) does not include **1**, which means this result is **statistically significant**.
+This suggests a strong association between CPAP adherence and a reduced likelihood of daytime sleepiness when using Inverse Probability of Treatment Weighting (IPTW) to adjust for confounding factors.
+
+10. Similarly, estimate the ATT using IPTW, and compare this estimate to the ATE.
+
+```{r}
+m_PSw_ATT <- svyglm ( formula = Daytime_sleepiness ~ CPAP_adherence,
+design = svy_ATT,
+family = "quasibinomial", data = OSA )
+exp(c( coef ( m_PSw_ATT )[2] ,confint ( m_PSw_ATT )[2,]))
+```
+
+-   The **ATT estimate** is **slightly lower** than the **ATE estimate**, suggesting that the effect of CPAP adherence is **stronger for those who actually adhered to the treatment** compared to the general population.
+
+-   Both the **ATE and ATT estimates** show a **significant reduction** in the odds of daytime sleepiness associated with CPAP adherence, as indicated by their odds ratios being far below **1** and their confidence intervals not including **1**.
+
+-   The difference between the **ATE and ATT** implies that CPAP adherence may be more effective for patients who are already predisposed to adhere, possibly due to factors like motivation, health awareness, or support systems.
+
+The following code allows us to obtain bootstrap confidence intervals:
+
+```{r}
+fATE_weight <- function ( data, indices ) {
+d <- data [ indices, ] # allows boot to select sample
+m1 <-glm(CPAP_adherence ~ Sex +
+Age +
+BMI +
+Snoring +
+Smoking +
+OSA_severity,
+data =d, family = binomial )
+d$PS <- fitted.values(m1)
+d$w <- ifelse (d$CPAP_adherence==1 ,1/d$ PS,1 /(1 -d$PS))
+d$ w_ATT <- ifelse (d$CPAP_adherence==1 ,1,d $PS /(1 -d$PS))
+m_PSw <- svyglm ( Daytime_sleepiness ~ CPAP_adherence,
+design = svydesign (~ 1, weights = ~ w, data =d),
+data = d,family ="quasibinomial")
+ATE_w <-coef ( m_PSw )[2]
+m_PSw_ATT <- svyglm ( Daytime_sleepiness ~ CPAP_adherence,
+design = svydesign (~1 , weights =~ w_ATT, data =d),
+data =d, family ="quasibinomial")
+ATT_w <-coef ( m_PSw_ATT )[2]
+return (c( ATE_w,ATT_w ))
+}
+set.seed (123)
+results_boot_w <- boot( data = OSA, statistic = fATE_weight,R =1000)
+res_ATE_w <- exp(c( coef ( m_PSw )[2],
+boot.ci(results_boot_w,type ="norm" ,index =1)$norm [-1]))
+res_ATE_w
+res_ATT_w <-exp(c( coef ( m_PSw_ATT )[2],
+boot.ci(results_boot_w,type ="norm" ,index =2)$norm [-1]))
+res_ATT_w
+```
+
+The bootstrap confidence intervals for both the **ATE** and **ATT** confirm that CPAP adherence significantly reduces the odds of experiencing daytime sleepiness.
+For the **ATE**, the odds ratio is **0.2073** with a confidence interval of **0.1674 to 0.2565**, meaning that CPAP adherence lowers the odds of daytime sleepiness for the entire population.
+For the **ATT**, the odds ratio is **0.1656** with a confidence interval of **0.1671 to 0.2709**, showing a similar reduction for patients who adhered to CPAP.
+The confidence intervals for both estimates do not include **1**, which means the results are statistically significant.
+The **ATE** interval is narrower, suggesting a more precise estimate compared to the **ATT**.
+Overall, these results confirm that CPAP adherence is effective in reducing daytime sleepiness.
+
+Matching on the propensity score We are now going to look at propensity score matching.
+11.
+Create a first matched dataset using nearest neighbor matching without replacement, with a caliper of 0.2.
+The caliper specifies a maximum distance we don't want to exceed between the PS values of two matched individuals.
+You can use the following command:
+
+```{r}
+# Calculate the PS and match on the PS
+m.out <- matchit (CPAP_adherence ~ Sex +
+Age +
+BMI +
+Snoring +
+Smoking +
+OSA_severity,
+data = OSA , replace =FALSE, distance ="glm",
+link ="logit", method = "nearest", caliper =0.2 ,
+std.caliper =TRUE, ratio = 1)
+# Obtain the matched dataset
+datm <- get_matches (m.out ,id="ID")
+```
+
+12\.
+Using summary(m.out) look at the number of matched and unmatched patients in each group.
+Increase the caliper value and create a second matched dataset.
+What is the impact on the number of unmatched adherent patients ?
+
+```{r}
+summary (m.out )$nn
+```
+
+```{r}
+# Calculate the PS and match on the PS
+m.out_large_caliper <- matchit (CPAP_adherence ~ Sex +
+Age +
+BMI +
+Snoring +
+Smoking +
+OSA_severity,
+data = OSA , replace =FALSE, distance ="glm",
+link ="logit", method = "nearest", caliper =0.8 ,
+std.caliper =TRUE, ratio = 1)
+summary (m.out_large_caliper)$nn
+```
+
+After increasing the caliper value, the number of matched patients significantly improved, with 863 matched control patients and 863 matched treated (adherent) patients, compared to the initial 662 matched pairs.
+This adjustment reduced the number of unmatched adherent patients from 408 to 207 and unmatched control patients from 268 to 67.
+
+By allowing a wider tolerance in the matching process, more patients found suitable matches, increasing the overall sample size and enhancing the statistical power of the analysis.
+However, while this approach includes more patients, the quality of the matches may decrease because the paired patients might be less similar due to the relaxed matching criteria.
+Therefore, it is essential to balance maximizing the number of matched patients with maintaining match quality to ensure the results remain reliable and valid.
+
+13. Using the function CreateCatTable, describe the patients characteristics between groups after matching. Are the groups balanced?
+
+```{r}
+Table1_m <- CreateCatTable ( vars = column_of_interest, strata ="CPAP_adherence", data = datm,smd =T)
+print ( Table1_m, smd=T)
+```
+
+After matching, the characteristics of CPAP adherent and non-adherent patients are mostly well-balanced.
+Variables like **BMI, snoring, smoking, and OSA severity** show minimal differences between the groups, with low standardized mean differences (SMDs), indicating good balance.
+However, there are still some slight imbalances in **sex** (SMD = 0.158) and **age** (SMD = 0.214), meaning the adherent group has a higher percentage of males and younger patients compared to the non-adherent group.
+The most noticeable difference is in **daytime sleepiness** (SMD = 0.827), where a much higher proportion of non-adherent patients report experiencing daytime sleepiness compared to adherent patients.
+This difference likely reflects the impact of CPAP treatment in reducing daytime sleepiness.
+Overall, the matching process improved the comparability between the groups, making them more similar for the analysis, but some differences still remain.
+
+14. The MatchIt package includes commands to produce diagnostics plots. Standardized mean differences (before and after matching), the distribution of the PS among matched and unmatched individuals, and after matching can be obtained as follows: What do you notice about the distribution of the PS among the non users after matching ? Why was it expected ?
+
+```{r}
+# Histogram of the PS per group before and after matching
+plot (m.out , type = "histogram")
+#PS distribution in matched and unmatched samples
+plot (m.out , type = "jitter", interactive = FALSE )
+```
+
+What do you notice about the distribution of the PS among the non users after matching ?
+Why was it expected ?
+The package also produces a plot of standardised differences, before and after matching.
+Unlike the tableone package, MatchIt computes the standardized differences for each category of categorical variables.
+On the first row, the variable distance is the propensity score itself.
+
+```{r}
+# Plot of standardized mean differences
+plot ( summary (m.out , interactions = F), var.order = "unmatched")
+```
+
+The diagnostic plots show that the matching process significantly improved the balance between the CPAP adherent and non-adherent groups.
+The histograms and jitter plot indicate that before matching, the distribution of propensity scores differed between the two groups, with many non-adherent patients having low propensity scores.
+After matching, the distributions of propensity scores for both groups align more closely, demonstrating that the matched controls are more comparable to the treated group.
+
+The standardized mean difference (SMD) plot further supports this by showing that before matching, several covariates like **Age \> 70, Age \< 40, and Smoking** had large SMDs, indicating significant differences.
+After matching, most SMDs are reduced and fall below the threshold of **0.1**, indicating good balance for most covariates.
+Although slight imbalances remain for a few covariates, the overall balance is much better, making the two groups more comparable.
+This improved balance ensures that any differences in outcomes, such as **daytime sleepiness**, are more likely to be due to CPAP adherence rather than confounding factors.
+
+Estimate the ATT using the matched dataset.
+To account for the matching procedure in the calculation of the standard errors, you may use the following command :
+
+```{r}
+# Logistic regression with clustered standard errors
+mod <-glm.cluster( data =datm , formula = Daytime_sleepiness ~ CPAP_adherence,
+cluster ="subclass", family ="binomial")
+```
+
+```{r}
+summary (mod )
+#OR and 95% CI
+exp ( cbind ( coef (mod ), confint (mod)))
+
+```
+
+```{r}
+ATT_match <- exp ( cbind ( coef (mod ), confint (mod)))
+```
+
+The logistic regression results using the matched dataset and clustered standard errors show that CPAP adherence is significantly associated with a reduction in daytime sleepiness.
+The estimate for CPAP adherence is -1.6115, with a standard error of 0.1174, resulting in a z-value of -13.73 and a p-value of 6.76e-43, which is highly significant.
+The 95% confidence interval for the odds ratio is 0.1586 to 0.2512, meaning the odds of experiencing daytime sleepiness for CPAP-adherent patients are between 15.9% and 25.1% of the odds for non-adherent patients.
+
+This confirms that CPAP adherence is associated with a substantial decrease in the likelihood of daytime sleepiness.
+The Intercept estimate of 0.7527 reflects the baseline odds of daytime sleepiness for non-adherent patients.
+
+Overall, these results indicate that CPAP adherence has a strong and statistically significant effect in reducing daytime sleepiness, reinforcing the effectiveness of the treatment.
+
+16. Now, modify your code to perform matching with replacement. What is the impact of replacement on the number of unmatched adherent patients? And on the balance between groups?
+
+```{r}
+# Calculate the PS and match on the PS
+m.out_r <- matchit (CPAP_adherence ~ Sex +
+Age +
+BMI +
+Snoring +
+Smoking +
+OSA_severity,
+data = OSA , replace =TRUE, distance ="glm",
+link ="logit", method = "nearest", caliper =0.2 ,
+std.caliper =TRUE, ratio = 1)
+# Obtain the matched dataset
+datm_r <- get_matches (m.out_r ,id="ID")
+summary (m.out_r)$nn
+```
+
+```{r}
+Table1_m2 <- CreateCatTable ( vars = column_of_interest, strata ="CPAP_adherence",
+data = datm_r,smd =T)
+print ( Table1_m2, smd=T)
+```
+
+After performing matching with replacement, the results show significant changes in the number of matched and unmatched patients as well as the balance between groups.
+The number of matched treated (adherent) patients remains at 1070, while the effective sample size (ESS) for controls is reduced to 222.4, meaning some control patients were used multiple times to achieve matching.
+The number of matched controls is now 455, and 475 control patients remain unmatched.
+Importantly, there are no unmatched adherent patients, as replacement allows each treated patient to find a suitable control match by reusing controls when necessary.
+
+In terms of balance, the standardized mean differences (SMDs) across covariates show that the groups are now well-balanced.
+For example, the SMD for sex is 0.002, for age it is 0.058, and for BMI it is 0.044, all of which are below the threshold of 0.1, indicating good balance.
+However, daytime sleepiness still shows a significant imbalance with an SMD of 0.851, reflecting the impact of CPAP adherence on reducing daytime sleepiness.
+
+Overall, matching with replacement improves the ability to match all treated patients, eliminating the issue of unmatched adherent patients.
+It also achieves better balance between the groups by allowing controls to be reused, which increases the effective sample size for the treated group.
+While balance is achieved for most covariates, the difference in daytime sleepiness remains, likely due to the strong treatment effect of CPAP adherence.
+
+17. Calculate the number of times each matched control (non user) is used. Look at the characteristics of the controls used many times (e.g. \> 20) as well as their estimated PS weight (first part of this practical). What do you notice ?
+
+```{r}
+datm_r$obs <-1
+rep <- aggregate(obs~id, data = datm_r[datm_r$CPAP_adherence==0,], sum)
+table(rep$obs )
+table_obs <- table(rep$obs )
+rep[rep$obs >20,]
+OSA[ OSA$id %in% rep[rep$obs >20,]$id,]
+```
+
+One control patient (ID 925) was matched 23 times during the matching process with replacement, highlighting a significant reliance on this individual.
+This patient is a male under 40 years old, classified as obese very severe, a non-smoker, with snoring and daytime sleepiness.
+Their high propensity score (0.913) indicates they were highly likely to adhere to CPAP based on their characteristics, making them a suitable match for many adherent patients.
+The associated weight of 11.49 is notably large, meaning this patient's influence on the analysis is substantial.
+This repeated use suggests a limited pool of suitable control matches with high propensity scores, which the matching with replacement attempted to overcome.
+However, this heavy reliance on a single control can lead to instability in the estimates and potential bias in the results, as the conclusions may be disproportionately driven by a few individuals.
+To mitigate this, it might be necessary to trim weights or adjust the matching strategy to ensure more balanced and robust findings.
+
+18. Estimate the ATT using this new matched dataset.
+    Compare the results to those of matching without
+
+    replacement.
+    To account for repeated sampling, you may use:
+
+```{r}
+# Logistic regression with clustered standard errors
+mod2 <-glm( data =datm_r , formula = Daytime_sleepiness ~ CPAP_adherence, family ="binomial")
+summary (mod2 )
+#OR and 95% CI
+
+#OR and confidence intervals
+c(exp( coeftest (mod2 , vcov. = vcovCL ,cluster = ~ subclass + id)[2 ,1]) ,
+exp ( coefci (mod2 , vcov. = vcovCL ,
+cluster = ~ subclass + id)[2 ,]))
+ATT_match_r <- c(exp( coeftest (mod2 , vcov. = vcovCL ,cluster = ~ subclass + id)[2 ,1]) ,
+exp ( coefci (mod2 , vcov. = vcovCL ,
+cluster = ~ subclass + id)[2 ,]))
+```
+
+The ATT estimated using the new matched dataset with replacement shows that CPAP adherence significantly reduces the odds of daytime sleepiness, with an odds ratio of **0.1875** and a **95% confidence interval of 0.1402 to 0.2507**.
+This means CPAP-adherent patients have about **81.3% lower odds** of experiencing daytime sleepiness compared to non-adherent patients.
+When compared to the ATT estimated without replacement (**0.1656**), the effect is slightly weaker, and the confidence interval is slightly wider.
+Matching with replacement allows more treated patients to be matched by reusing controls, improving the sample size and balance between the groups.
+However, this comes at the cost of **increased variability** since some controls are used multiple times, which can reduce the **precision** of the estimate.
+Despite this, both methods confirm the significant impact of CPAP adherence in reducing daytime sleepiness, with consistent results across approaches.
+
+19. Now, estimate the ATE. With the MatchIt package, the only available matching procedure to estimate the ATE is full matching, as follows:
+
+```{r}
+m.out3 <- matchit (CPAP_adherence ~ Sex +
+Age +
+BMI +
+Snoring +
+Smoking +
+OSA_severity,
+data = OSA , distance ="glm", link ="logit",
+estimand ="ATE", method = "full",
+caliper =0.2 , std.caliper =TRUE)
+# Obtain the matched dataset
+datm_full <- OSA
+datm_full$weight <- m.out3$weights
+datm_full$subclass <- m.out3$subclass
+datm_full <- datm_full[!is.na(datm_full$subclass),]
+```
+
+20\.
+Produce the diagnostics plots.
+Is the distribution of the PS after full matching similar to the distribution after nearest neighbour matching?
+Why/why not?
+
+```{r}
+# Histogram of the PS per group before and after matching
+plot (m.out3 , type = "histogram")
+#PS distribution in matched and unmatched samples
+plot (m.out3 , type = "jitter", interactive = FALSE )
+# Plot of standardized mean differences
+plot ( summary (m.out3 , interactions = F), var.order = "unmatched")
+```
+
+21. How is the balance between treatment groups after full matching?
+
+```{r}
+mod3 <- glm.cluster(data = datm_full, 
+                    formula = Daytime_sleepiness ~ CPAP_adherence, 
+                    weights = datm_full$weight,
+                    cluster = datm_full$subclass)  
+
+
+summary(mod3)
+exp (cbind (coef (mod3 ), confint ( mod3 ))) #OR
+ATE_full_match <- exp (cbind (coef (mod3 ), confint ( mod3 ))) #OR
+```
+
+22. Complete the table below and compare all your estimates from the different methods. Do you notice any patterns?
+
+During the course two more advanced methods (doubly robust) were presented to you : AIPW and TMLE.
+Propose an implementation of these methods to calculate the ATE and ATT :
+
+```{r}
+library(AIPW)
+library(SuperLearner)
+require(tmle)
+```
